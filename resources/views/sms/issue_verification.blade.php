@@ -1,0 +1,1 @@
+Hi, your OTP for Preetham Nagarigari website access is : {{ $otp }}

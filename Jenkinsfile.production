@@ -1,0 +1,56 @@
+pipeline {
+    agent any
+    environment {
+        SSH_USER = "deployer"
+        SSH_HOST = "app-external.mgmt.molitics.in"
+        BUILD_FILE = "${new Date().format( 'yyyyMMddHHmmss' )}.tar"
+        REPO_NAME = "preetham_inc"
+        SITE_URL = "www.preetham.info"
+        ENV = "production"
+    }
+    stages {
+
+        stage("composer_install") {
+            steps {
+                sh "/usr/local/bin/composer install --optimize-autoloader"
+            }
+        }
+        stage("build") {
+            steps {
+                sh "tar -cf ${env.BUILD_FILE} . --exclude-vcs"
+            }
+        }
+        stage("deploy") {
+            steps {
+                sshagent(credentials : ["9547f131-23d1-47f8-8c3d-0a5b10e169e6"]) {
+                    sh "ssh -o StrictHostKeyChecking=no ${env.SSH_USER}@${env.SSH_HOST} uptime"
+                    sh "ssh -v ${env.SSH_USER}@${env.SSH_HOST}"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo mkdir -p /var/logs/${env.REPO_NAME} 2>/dev/null"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo rm -rf /var/www/builds/${env.REPO_NAME}/temp 2>/dev/null"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo mkdir -p /var/www/builds/${env.REPO_NAME}/temp"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo chown -R ${env.SSH_USER}:opsworks /var/www/builds/${env.REPO_NAME}/temp"
+                    sh "scp ${env.BUILD_FILE} ${env.BUILD_FILE} ${env.SSH_USER}@${env.SSH_HOST}:/var/www/builds/${env.REPO_NAME}/temp"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo tar -xf /var/www/builds/${env.REPO_NAME}/temp/${env.BUILD_FILE} -C /var/www/builds/${env.REPO_NAME}/temp"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo rm -rf /var/www/html/${env.REPO_NAME}/"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo mv /var/www/builds/${env.REPO_NAME}/temp/ /var/www/html/${env.REPO_NAME}/"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo cp /var/www/html/${env.REPO_NAME}/.env.${env.ENV} /var/www/html/${env.REPO_NAME}/.env"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo chown -R apache:apache /var/www/html/${env.REPO_NAME}"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo chown -R apache:apache /var/logs/${env.REPO_NAME}"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo chmod -R 755 /var/www/html/${env.REPO_NAME}/storage"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo rm -rf /etc/httpd/conf.d/${env.SITE_URL}.conf"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo rm -rf /etc/nginx/conf.d/${env.SITE_URL}.conf"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo ln -s /var/www/html/${env.REPO_NAME}/deployment/httpd.${env.ENV}.conf /etc/httpd/conf.d/${env.SITE_URL}.conf"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo ln -s /var/www/html/${env.REPO_NAME}/deployment/nginx.${env.ENV}.conf /etc/nginx/conf.d/${env.SITE_URL}.conf"
+                    sh "ssh ${env.SSH_USER}@${env.SSH_HOST} sudo service httpd restart"
+                }
+             }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: "${env.BUILD_FILE}", fingerprint: true
+            deleteDir() /* clean up our workspace */
+        }
+    }
+}
